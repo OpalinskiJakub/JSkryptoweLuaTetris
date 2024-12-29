@@ -372,24 +372,20 @@ function rotatePiece()
     if newRotation > #game.currentPiece.type.rotations then
         newRotation = 1
     end
+
+    -- Sprawdź, czy rotacja jest możliwa
     if isValidPosition(game.currentPiece, game.currentPiece.x, game.currentPiece.y, newRotation) then
         game.currentPiece.rotation = newRotation
         game.currentPiece.shape = tetrominoes[game.currentPiece.typeIndex].rotations[newRotation]
         if sounds.rotate then 
             sounds.rotate:play() 
-            print("Dźwięk obrotu odtworzony.")
-        else
-            print("Dźwięk obrotu nie jest załadowany.")
         end
         print("Obrócono klocek. Nowa rotacja: " .. newRotation)
-        
-        -- Aktualizacja wyniku przy obrocie
-        game.score = game.score + 1
-        print("Aktualny wynik: " .. game.score)
     else
         print("Nie można obrócić klocka do rotacji: " .. newRotation)
     end
 end
+
 
 function isValidPosition(piece, x, y, rotation)
     local shape = piece.type.rotations[rotation]
