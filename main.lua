@@ -77,11 +77,12 @@ end
 sounds = {}
 
 function love.load()
+    love.filesystem.setIdentity("tetris_game")
+
     love.window.setMode(WINDOW_WIDTH, WINDOW_HEIGHT)
     love.window.setTitle("Tetris in Lua - Love2D")
 
     love.graphics.setBackgroundColor(0.1, 0.1, 0.1)
-
     love.graphics.setFont(love.graphics.newFont(20))
 
     local function loadSound(name, path)
@@ -91,7 +92,7 @@ function love.load()
         if success and sound then
             sounds[name] = sound
         else
-            print("Ostrzeżenie: Nie można załadować " .. path .. ". " .. (sound or "Nieznany błąd"))
+            print("Ostrzeżenie: Nie można załadować " .. path .. ".")
             sounds[name] = nil
         end
     end
@@ -117,6 +118,7 @@ function love.load()
 
     initializeGrid()
 end
+
 
 function love.keypressed(key)
     if state == "menu" then
@@ -482,10 +484,31 @@ function clearLines()
     end
 end
 
-function saveAndReturnToMenu()
-    local timestamp = os.date("%Y%m%d_%H%M%S")
-    local filename = "save_" .. timestamp .. ".lua"
+function getSavePath(filename)
+    -- Katalog `saves` w domyślnym katalogu Love2D
+    local basePath = "saves"
+    if filename then
+        -- Zwróć pełną ścieżkę do pliku
+        return basePath .. "/" .. filename
+    else
+        -- Zwróć tylko ścieżkę katalogu
+        return basePath
+    end
+end
 
+
+function saveAndReturnToMenu()
+    -- Upewnij się, że katalog `saves` istnieje
+    local saveDir = getSavePath()
+    if not love.filesystem.getInfo(saveDir, "directory") then
+        love.filesystem.createDirectory(saveDir)
+    end
+
+    -- Konstrukcja nazwy pliku
+    local filename = "save_" .. os.date("%Y%m%d_%H%M%S") .. ".lua"
+    local filePath = getSavePath(filename)
+
+    -- Dane do zapisania
     local saveData = {
         grid = game.grid,
         currentPiece = {
@@ -504,11 +527,19 @@ function saveAndReturnToMenu()
         gameOver = game.gameOver
     }
 
+    -- Serializacja i zapis
     local serialized = serialize(saveData)
-    love.filesystem.write("saves/" .. filename, serialized)
-    print("Gra zapisana jako " .. filename)
+    local success, err = love.filesystem.write(filePath, serialized)
+    if success then
+        print("Gra została zapisana w katalogu: " .. love.filesystem.getSaveDirectory() .. "/" .. filePath)
+    else
+        print("Nie udało się zapisać gry: " .. (err or "nieznany błąd"))
+    end
+
     state = "menu"
 end
+
+
 
 function saveGame(filename)
     local saveData = {
@@ -535,62 +566,64 @@ function saveGame(filename)
 end
 
 function loadGame(filename)
-    if love.filesystem.getInfo(filename) then
-        local serialized = love.filesystem.read(filename)
+    local filePath = getSavePath(filename)
+
+    if love.filesystem.getInfo(filePath) then
+        -- Odczyt i deserializacja danych
+        local serialized = love.filesystem.read(filePath)
         local saveData = deserialize(serialized)
+
         if saveData then
+            -- Przywróć stan gry
             game.grid = saveData.grid
-            if saveData.currentPiece then
-                local typeIndex = saveData.currentPiece.typeIndex
-                if typeIndex and tetrominoes[typeIndex] then
-                    game.currentPiece = {}
-                    game.currentPiece.typeIndex = typeIndex
-                    game.currentPiece.type = tetrominoes[typeIndex]
-                    game.currentPiece.rotation = saveData.currentPiece.rotation
-                    game.currentPiece.shape = tetrominoes[typeIndex].rotations[game.currentPiece.rotation]
-                    game.currentPiece.x = saveData.currentPiece.x
-                    game.currentPiece.y = saveData.currentPiece.y
-                else
-                    print("Błąd: Nieprawidłowy typeIndex w currentPiece.")
-                    game.currentPiece = spawnPiece()
-                end
-            end
-            if saveData.nextPiece then
-                local typeIndex = saveData.nextPiece.typeIndex
-                if typeIndex and tetrominoes[typeIndex] then
-                    game.nextPiece = {}
-                    game.nextPiece.typeIndex = typeIndex
-                    game.nextPiece.type = tetrominoes[typeIndex]
-                    game.nextPiece.rotation = saveData.nextPiece.rotation
-                    game.nextPiece.shape = tetrominoes[typeIndex].rotations[game.nextPiece.rotation]
-                    game.nextPiece.x = saveData.nextPiece.x
-                    game.nextPiece.y = saveData.nextPiece.y
-                else
-                    print("Błąd: Nieprawidłowy typeIndex w nextPiece.")
-                    game.nextPiece = spawnPiece()
-                end
-            end
+            game.currentPiece = restorePiece(saveData.currentPiece)
+            game.nextPiece = restorePiece(saveData.nextPiece)
             game.score = saveData.score or 0
             game.gameOver = saveData.gameOver or false
-            print("Gra załadowana z " .. filename)
             state = "game"
+            print("Gra została załadowana z pliku: " .. filePath)
         else
-            print("Błąd podczas deserializacji danych zapisu.")
+            print("Nie udało się wczytać danych z pliku: " .. filePath)
         end
     else
-        print("Plik zapisu nie został znaleziony!")
+        print("Plik zapisu nie istnieje: " .. filePath)
     end
 end
 
+
+function restorePiece(pieceData)
+    local typeIndex = pieceData.typeIndex
+    local piece = {}
+    piece.typeIndex = typeIndex
+    piece.type = tetrominoes[typeIndex]
+    piece.rotation = pieceData.rotation
+    piece.shape = tetrominoes[typeIndex].rotations[pieceData.rotation]
+    piece.x = pieceData.x
+    piece.y = pieceData.y
+    return piece
+end
+
+
+
 function loadSavedGames()
     loadMenu.options = {}
-    local files = love.filesystem.getDirectoryItems("saves")
+
+    local saveDir = getSavePath()
+    if not love.filesystem.getInfo(saveDir, "directory") then
+        print("Katalog `saves` nie istnieje. Brak zapisanych gier.")
+        return
+    end
+
+    -- Pobierz pliki z katalogu `saves`
+    local files = love.filesystem.getDirectoryItems(saveDir)
     for _, file in ipairs(files) do
         if file:match("%.lua$") then
             table.insert(loadMenu.options, file)
         end
     end
+
     loadMenu.selected = 1
+
     if #loadMenu.options == 0 then
         print("Nie znaleziono żadnych zapisanych gier.")
     else
@@ -598,12 +631,14 @@ function loadSavedGames()
     end
 end
 
+
 function loadSelectedGame()
     if loadMenu.options[loadMenu.selected] then
-        local filename = "saves/" .. loadMenu.options[loadMenu.selected]
+        local filename = loadMenu.options[loadMenu.selected]
         loadGame(filename)
     end
 end
+
 
 function deleteSelectedSave()
     local filename = "saves/" .. loadMenu.options[loadMenu.selected]
